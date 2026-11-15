@@ -1,22 +1,20 @@
 from collections import defaultdict
 
 from ..values import safe_ratio
+from .scope_view import complete_city_days
 
 
 def relative_calendar_days(period):
     grouped = defaultdict(lambda: {"city_days": 0, "complete_city_days": 0, "orders": 0,
                                    "travelers": 0, "net_cents": 0, "cities": set()})
-    coverage = defaultdict(list)
-    for cell in period["coverage"]:
-        coverage[(cell["city"], cell["day"])].append(cell["status"])
+    completeness = complete_city_days(period)
     for row in period["cube"]["tables"]["daily"]:
         if row["calendar_id"] is None:
             continue
         key = (row["offset"], row["holiday"])
         item = grouped[key]
         item["city_days"] += 1
-        statuses = coverage[(row["city"], row["day"])]
-        item["complete_city_days"] += int(bool(statuses) and all(value == "complete" for value in statuses))
+        item["complete_city_days"] += int(completeness.get((row["city"], row["day"]), False))
         item["orders"] += row["measures"]["orders"]
         item["travelers"] += row["measures"]["travelers"]
         item["net_cents"] += row["measures"]["net_cents"]
@@ -56,11 +54,13 @@ def calendar_balances(period, references):
 
 def peak_alignment(period):
     peaks = period["cube"]["peak_days"]
+    exposure_cities = {row["city"] for row in period["exposure"]}
     calendar_cities = {row["city"] for row in period["exposure"] if row["calendar_id"]}
     eligible = [row for row in peaks if row["days"] and row["city"] in calendar_cities]
     inside = [row for row in eligible if row["holiday_peak"]]
     outside = [row for row in eligible if not row["holiday_peak"]]
-    unknown = [row["city"] for row in peaks if row["city"] not in calendar_cities or not row["days"]]
+    unknown = [row["city"] for row in peaks
+               if row["city"] not in calendar_cities or not row["days"] or row["city"] not in exposure_cities]
     return {"eligible_cities": len(eligible), "all_peaks_in_holiday": len(inside),
             "not_all_peaks_in_holiday": len(outside), "fraction": safe_ratio(len(inside), len(eligible)),
             "unknown_cities": unknown,

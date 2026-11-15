@@ -61,14 +61,20 @@ class EditionQuery:
                 "stale": edition["stale"], "periods": periods, "quality": edition["result"]["quality"],
                 "comparison": edition["result"]["comparison"], "result_digest": edition["result_digest"]}
 
-    def coverage_filter(self, identity, period="current", status=None, source=None, city=None, limit=100, offset=0):
+    def coverage_filter(self, identity, period="current", status=None, source=None, city=None,
+                        report_status=None, limit=100, offset=0):
         page_size(limit, offset)
         require(status is None or status in {"complete", "partial", "missing"}, "invalid_status", "覆盖状态无效")
+        require(report_status is None or report_status in {"observed", "confirmed_zero", "partial", "missing",
+                                                           "not_applicable", "unconfirmed", "ambiguous"},
+                "invalid_report_status", "报告状态无效")
         edition = self.editions.get(identity)
         require(period in edition["result"]["periods"], "unknown_period", "分析没有该期间")
         result = []
         for row in edition["result"]["periods"][period]["coverage"]:
             if status is not None and row["status"] != status:
+                continue
+            if report_status is not None and row.get("report_status") != report_status:
                 continue
             if source is not None and row["source"] != source:
                 continue

@@ -13,7 +13,7 @@ class Investigation:
         self.catalog = catalog
 
     def drilldown(self, edition_id, period="current", origin=None, destination=None, source=None,
-                  day=None, state=None, limit=100, offset=0):
+                  day=None, state=None, limit=100, offset=0, include_excluded=False):
         page_size(limit, offset)
         edition = self.editions.get(edition_id)
         require(period in edition["result"]["periods"], "unknown_period", "分析没有该期间")
@@ -27,11 +27,21 @@ class Investigation:
         if day is not None:
             from ..values import iso_day
             iso_day(day)
-        records = edition["result"]["periods"][period]["orders"]
-        selected = [row for row in records if all(value is None or row[field] == value for field, value in filters.items())]
+        content = edition["result"]["periods"][period]
+        records = content["orders"]
+        excluded = content.get("excluded_orders", [])
+        if include_excluded:
+            rows = [{**row, "outside_declared_scope": False} for row in records]
+            rows += [{**row, "outside_declared_scope": True} for row in excluded]
+        else:
+            rows = records
+        selected = [row for row in rows if all(value is None or row[field] == value for field, value in filters.items())]
         return {"edition_id": edition_id, "data_revision": edition["data_revision"], "period": period,
                 "filters": {key: value for key, value in filters.items() if value is not None},
+                "include_excluded": include_excluded, "excluded_available": len(excluded),
                 "total": len(selected), "totals": totals(selected), "offset": offset,
+                "note": ("范围外订单只在 include_excluded=true 时列出，且不计入范围内统计"
+                         if excluded else "没有范围外订单"),
                 "items": selected[offset:offset + limit]}
 
     def order_trace(self, edition_id, source, order_id):
@@ -45,7 +55,12 @@ class Investigation:
         for period, content in edition["result"]["periods"].items():
             for row in content["orders"]:
                 if row["source"] == source and row["order_id"] == order_id:
-                    occurrences.append({"period": period, "sequence": row["sequence"], "event_id": row["event_id"]})
+                    occurrences.append({"period": period, "sequence": row["sequence"], "event_id": row["event_id"],
+                                        "outside_declared_scope": False})
+            for row in content.get("excluded_orders", []):
+                if row["source"] == source and row["order_id"] == order_id:
+                    occurrences.append({"period": period, "sequence": row["sequence"], "event_id": row["event_id"],
+                                        "outside_declared_scope": True})
         return {"edition_id": edition_id, "data_revision": edition["data_revision"],
                 "source": source, "order_id": order_id, "selected_at_snapshot": selected,
                 "included_in_periods": occurrences,
@@ -74,18 +89,22 @@ class Investigation:
         result = edition["result"]
         all_periods = []
         identities = set()
+        excluded = []
         for period, content in result["periods"].items():
             for row in content["orders"]:
                 identity = (row["source"], row["order_id"])
                 require(identity not in identities, "duplicate_head", "订单头在不重叠期间中重复", 500)
                 identities.add(identity)
                 all_periods.append({"period": period, **row})
+            excluded += [{"period": period, **row} for row in content.get("excluded_orders", [])]
         lineage_keys = {(row["period"], row["source"], row["order_id"], row["sequence"]) for row in result["lineage"]}
         order_keys = {(row["period"], row["source"], row["order_id"], row["sequence"]) for row in all_periods}
         return {"edition_id": edition_id, "ok": lineage_keys == order_keys,
                 "order_heads": len(order_keys), "lineage_entries": len(result["lineage"]),
+                "excluded_heads": len(excluded),
                 "missing_lineage": [list(x) for x in sorted(order_keys - lineage_keys)],
-                "orphan_lineage": [list(x) for x in sorted(lineage_keys - order_keys)]}
+                "orphan_lineage": [list(x) for x in sorted(lineage_keys - order_keys)],
+                "note": "范围外订单不计入分组与谱系，单独计数并以冲突清单呈现"}
 
     def publication_impact(self, after_revision):
         integer(after_revision, "after_revision")
@@ -120,12 +139,24 @@ class Investigation:
         grouped = defaultdict(list)
         for order in content["orders"]:
             grouped[(order["source"], order["origin"], order["travel_day"])].append(order)
+        for order in content.get("excluded_orders", []):
+            grouped[(order["source"], order["origin"], order["travel_day"])].append(order)
         rows = []
         for cell in content["coverage"]:
             key = (cell["source"], cell["city"], cell["day"])
             records = grouped[key]
-            if cell["status"] != "complete" or not records:
-                rows.append({"source": key[0], "city": key[1], "day": key[2], "status": cell["status"],
-                             "note": cell["note"], "heads": len(records), "totals": totals(records),
-                             "interpretation": "已确认零记录" if cell["status"] == "complete" else "未确认完整，不能视为零"})
-        return {"edition_id": edition_id, "period": period, "cells": rows}
+            status = cell.get("report_status", cell["status"])
+            if status in {"observed", "confirmed_zero"}:
+                continue
+            interpretation = {
+                "not_applicable": "声明为不经营",
+                "unconfirmed": "尚未声明经营范围，不能视为零",
+                "ambiguous": "经营范围规则冲突，无法唯一解释",
+            }.get(status, "已确认零记录" if cell["status"] == "complete" else "未确认完整，不能视为零")
+            rows.append({"source": key[0], "city": key[1], "day": key[2], "status": cell["status"],
+                         "report_status": status, "applicability": cell.get("applicability"),
+                         "scope_ids": cell.get("scope_ids", []),
+                         "note": cell["note"], "heads": len(records), "totals": totals(records),
+                         "interpretation": interpretation})
+        return {"edition_id": edition_id, "period": period, "cells": rows,
+                "scope_disputes": content.get("scope_disputes", [])}

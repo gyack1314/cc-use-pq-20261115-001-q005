@@ -13,18 +13,38 @@ def source_reliability(period):
     result = []
     for source, cells in sorted(by_source.items()):
         counts = Counter(cell["status"] for cell in cells)
+        reports = Counter(cell.get("report_status", cell["status"]) for cell in cells)
+        applicability = Counter(cell.get("applicability", "applicable") for cell in cells)
+        applicable = [cell for cell in cells if cell.get("applicability", "applicable") == "applicable"]
         records = orders[source]
         revised = [order for order in records if order["sequence"] > 1]
         active = [order for order in records if order["state"] == "booked"]
         cancellations = [order for order in records if order["state"] == "cancelled"]
         net = sum(order["gross_cents"] - order["refund_cents"] for order in records)
-        result.append({"source": source, "expected_cells": len(cells), "complete_cells": counts["complete"],
-                       "partial_cells": counts["partial"], "missing_cells": counts["missing"],
-                       "coverage_fraction": safe_ratio(counts["complete"], len(cells)),
+        result.append({"source": source, "cells": len(cells), "expected_cells": len(applicable),
+                       "complete_cells": counts["complete"], "partial_cells": counts["partial"],
+                       "missing_cells": counts["missing"],
+                       "not_applicable_cells": applicability["not_applicable"],
+                       "unconfirmed_cells": applicability["unconfirmed"],
+                       "ambiguous_cells": applicability["ambiguous"],
+                       "report_cells": dict(reports),
+                       "coverage_fraction": safe_ratio(counts["complete"], len(applicable)),
                        "order_heads": len(records), "active_orders": len(active),
                        "cancelled_orders": len(cancellations), "revised_heads": len(revised),
                        "revised_fraction": safe_ratio(len(revised), len(records)), "net_cents": net})
     return result
+
+
+def scope_review(period):
+    """What was undeclared, ambiguous, or contradicted by observed orders."""
+    if not period.get("scope_disputes") and "scope" not in period:
+        return None
+    return {"disputes": period.get("scope_disputes", []),
+            "gaps": period.get("scope_gaps", []),
+            "declarations": [{"id": rule["id"], "version": rule["version"], "source": rule["source"],
+                              "city": rule["city"], "start": rule["start"], "end": rule["end"],
+                              "applicable": rule["applicable"], "status": rule["status"]}
+                             for rule in (period.get("scope") or {}).get("rules", [])]}
 
 
 def missing_intervals(period):
@@ -36,17 +56,19 @@ def missing_intervals(period):
         current = []
         runs = []
         for row in sorted(rows, key=lambda item: item["day"]):
-            if row["status"] != "complete":
+            status = row.get("report_status", row["status"])
+            if status in {"observed", "confirmed_zero", "not_applicable"} or status == "complete":
+                if current:
+                    runs.append(current)
+                    current = []
+            else:
                 current.append(row)
-            elif current:
-                runs.append(current)
-                current = []
         if current:
             runs.append(current)
         for run in runs:
             result.append({"source": key[0], "city": key[1], "start": run[0]["day"],
                            "end": run[-1]["day"], "days": len(run),
-                           "statuses": dict(Counter(item["status"] for item in run))})
+                           "statuses": dict(Counter(row.get("report_status", row["status"]) for row in run))})
     return result
 
 
@@ -66,23 +88,32 @@ def revision_exposure(period):
 def source_city_balance(period):
     grouped = defaultdict(lambda: {"orders": 0, "net_cents": 0, "heads": 0})
     coverage = defaultdict(Counter)
+    applicability = defaultdict(Counter)
     for order in period["orders"]:
         key = (order["source"], order["origin"])
         grouped[key]["heads"] += 1
         grouped[key]["orders"] += int(order["state"] == "booked")
         grouped[key]["net_cents"] += order["gross_cents"] - order["refund_cents"]
     for cell in period["coverage"]:
-        coverage[(cell["source"], cell["city"])][cell["status"]] += 1
+        key = (cell["source"], cell["city"])
+        coverage[key][cell["status"]] += 1
+        applicability[key][cell.get("applicability", "applicable")] += 1
     result = []
     for key in sorted(set(grouped) | set(coverage)):
         counts = coverage[key]
+        scope = applicability[key]
         measures = grouped[key]
         total = sum(counts.values())
+        applicable = scope["applicable"] if scope else total
         result.append({"source": key[0], "city": key[1], **measures,
-                       "expected_days": total, "complete_days": counts["complete"],
+                       "cells": total, "expected_days": applicable,
+                       "not_applicable_days": scope["not_applicable"] if scope else 0,
+                       "unconfirmed_days": scope["unconfirmed"] if scope else 0,
+                       "ambiguous_days": scope["ambiguous"] if scope else 0,
+                       "complete_days": counts["complete"],
                        "partial_days": counts["partial"], "missing_days": counts["missing"],
-                       "complete": total > 0 and counts["complete"] == total,
-                       "observed_orders_per_day": safe_ratio(measures["orders"], total)})
+                       "complete": applicable > 0 and counts["complete"] == applicable,
+                       "observed_orders_per_day": safe_ratio(measures["orders"], applicable)})
     return result
 
 
@@ -103,4 +134,4 @@ def cancellation_retention(period):
 def diagnostics(period):
     return {"source_reliability": source_reliability(period), "missing_intervals": missing_intervals(period),
             "revision_exposure": revision_exposure(period), "source_city_balance": source_city_balance(period),
-            "cancellation_retention": cancellation_retention(period)}
+            "cancellation_retention": cancellation_retention(period), "scope_review": scope_review(period)}

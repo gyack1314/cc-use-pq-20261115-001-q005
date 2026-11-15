@@ -28,6 +28,19 @@ class PublicationReadiness:
         checks.append({"code": "quality", "ok": publishable,
                        "message": "质量检查通过" if publishable else "存在阻止发布的质量问题",
                        "evidence": {"errors": edition["result"]["quality"]["errors"]}})
+        disputes = []
+        unresolved_scope = 0
+        for name, content in edition["result"]["periods"].items():
+            disputes += [{**item, "period": name} for item in content.get("scope_disputes", [])]
+            summary = content.get("scope_summary") or {}
+            unresolved_scope += summary.get("unconfirmed_cells", 0) + summary.get("ambiguous_cells", 0)
+        checks.append({"code": "scope_consistency", "ok": not disputes,
+                       "message": "没有与经营范围冲突的订单" if not disputes else "存在落在不经营范围的订单",
+                       "evidence": {"disputes": disputes[:50], "count": len(disputes)}})
+        checks.append({"code": "scope_declared", "ok": unresolved_scope == 0,
+                       "message": "经营范围已充分声明" if unresolved_scope == 0
+                       else "存在尚未确认或冲突的经营范围格子",
+                       "evidence": {"cells": unresolved_scope}})
         state_ok = edition["state"] in {"approved", "published"}
         checks.append({"code": "approval", "ok": state_ok,
                        "message": "分析已经审核" if state_ok else "当前状态不能发布",

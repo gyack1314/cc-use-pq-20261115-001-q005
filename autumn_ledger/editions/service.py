@@ -96,7 +96,9 @@ class Editions:
         for name, period in result["periods"].items():
             periods[name] = {"window": period["window"], "exposure": period["exposure_summary"],
                              "coverage": period["coverage_summary"], "gaps": period["coverage_gaps"],
-                             "totals": period["cube"]["totals"], "reconciliation": period["cube"]["reconciliation"]}
+                             "totals": period["cube"]["totals"], "reconciliation": period["cube"]["reconciliation"],
+                             "scope": period.get("scope"), "scope_summary": period.get("scope_summary"),
+                             "scope_disputes": period.get("scope_disputes", [])}
         return {"edition_id": identity, "state": edition["state"], "stale": edition["stale"],
                 "data_revision": edition["data_revision"], "result_digest": edition["result_digest"],
                 "periods": periods, "quality": result["quality"], "semantics": result["semantics"]}
@@ -127,4 +129,35 @@ class Editions:
         return {"left": left_id, "right": right_id, "left_revision": left["data_revision"],
                 "right_revision": right["data_revision"], "same_request": left["request"] == right["request"],
                 "added_heads": [list(x) for x in sorted(right_keys - left_keys)],
-                "removed_heads": [list(x) for x in sorted(left_keys - right_keys)], "metrics": metrics}
+                "removed_heads": [list(x) for x in sorted(left_keys - right_keys)], "metrics": metrics,
+                "scope": self.compare_scope(left["result"], right["result"])}
+
+    def compare_scope(self, left, right):
+        """Explain whether a scope revision moved the comparable range between editions."""
+        def rules(result):
+            period = result["periods"]["current"]
+            scope = period.get("scope")
+            return (scope or {}).get("rules", [])
+
+        def summary(result):
+            return {name: content.get("coverage_summary", {})
+                    for name, content in result["periods"].items()}
+
+        left_rules = {rule["id"]: rule for rule in rules(left)}
+        right_rules = {rule["id"]: rule for rule in rules(right)}
+        changes = []
+        for identity in sorted(set(left_rules) | set(right_rules)):
+            before = left_rules.get(identity)
+            after = right_rules.get(identity)
+            if before == after:
+                continue
+            changes.append({
+                "scope_id": identity, "before": before, "after": after,
+                "changed_fields": sorted(field for field in
+                                         ("source", "city", "start", "end", "applicable", "status", "note")
+                                         if (before or {}).get(field) != (after or {}).get(field)),
+                "type": "added" if before is None else "removed" if after is None else "revised"})
+        return {"present": bool(left_rules or right_rules), "changes": changes,
+                "same_scope": left_rules == right_rules,
+                "coverage_summary": {"left": summary(left), "right": summary(right)},
+                "note": "范围差异会改变应报格子和暴露分母，两侧覆盖摘要已并列供核对"}

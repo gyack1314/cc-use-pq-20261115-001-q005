@@ -42,12 +42,23 @@ def check_distributions(cube):
     return result
 
 
+def expected_covered_city_days(period):
+    summary = period["coverage_summary"]
+    if "report_cells" in summary:
+        city_days = {}
+        for cell in period["coverage"]:
+            key = (cell["city"], cell["day"])
+            city_days[key] = city_days.get(key, False) or cell["applicability"] == "applicable"
+        return sum(city_days.values())
+    return period["exposure_summary"]["city_days"]
+
+
 def check_daily(period):
     rows = period["cube"]["tables"]["daily"]
     identities = [(row["city"], row["day"]) for row in rows]
+    expected = expected_covered_city_days(period)
     result = [check("daily_unique", len(identities) == len(set(identities)), len(set(identities)), len(identities)),
-              check("daily_exposure", len(rows) == period["exposure_summary"]["city_days"],
-                    period["exposure_summary"]["city_days"], len(rows))]
+              check("daily_exposure", len(rows) == expected, expected, len(rows))]
     by_type = period["cube"]["day_mix"]
     by_holiday = period["cube"]["holiday_mix"]
     for metric in MEASURES:
@@ -65,10 +76,26 @@ def check_coverage(period):
     result = []
     keys = [(row["source"], row["city"], row["day"]) for row in rows]
     result.append(check("coverage_unique", len(keys) == len(set(keys))))
-    result.append(check("coverage_expected", len(rows) == summary["expected_cells"], summary["expected_cells"], len(rows)))
-    for status in ("complete", "partial", "missing"):
-        count = sum(row["status"] == status for row in rows)
-        result.append(check("coverage:" + status, count == summary[status + "_cells"], summary[status + "_cells"], count))
+    result.append(check("coverage_expected", len(rows) == summary.get("cells", summary["expected_cells"]),
+                        summary.get("cells", summary["expected_cells"]), len(rows)))
+    if "report_cells" in summary:
+        for status, count in summary["report_cells"].items():
+            actual = sum(row["report_status"] == status for row in rows)
+            result.append(check("report_status:" + status, count == actual, count, actual))
+        applicable = [row for row in rows if row["applicability"] == "applicable"]
+        result.append(check("applicable_expected", len(applicable) == summary["expected_cells"],
+                            summary["expected_cells"], len(applicable)))
+        for status in ("complete", "partial", "missing"):
+            actual = sum(row["status"] == status for row in applicable)
+            result.append(check("applicable_coverage:" + status, actual == summary[status + "_cells"],
+                                summary[status + "_cells"], actual))
+        outside = [row for row in rows if row["applicability"] == "not_applicable"
+                   and row["report_status"] != "not_applicable"]
+        result.append(check("not_applicable_never_reported", not outside, [], len(outside)))
+    else:
+        for status in ("complete", "partial", "missing"):
+            count = sum(row["status"] == status for row in rows)
+            result.append(check("coverage:" + status, count == summary[status + "_cells"], summary[status + "_cells"], count))
     return result
 
 

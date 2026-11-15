@@ -10,6 +10,8 @@ STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS calendar_city_revision ON calendars(city,revision)",
     "CREATE TABLE IF NOT EXISTS coverage (source TEXT NOT NULL, city TEXT NOT NULL, day TEXT NOT NULL, version INTEGER NOT NULL, revision INTEGER NOT NULL, status TEXT NOT NULL, note TEXT NOT NULL, PRIMARY KEY(source,city,day,version))",
     "CREATE INDEX IF NOT EXISTS coverage_revision ON coverage(revision,source,city,day)",
+    "CREATE TABLE IF NOT EXISTS operating_scopes (id TEXT NOT NULL, version INTEGER NOT NULL, revision INTEGER NOT NULL, source TEXT NOT NULL, city TEXT NOT NULL, start_day TEXT NOT NULL, end_day TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(id,version))",
+    "CREATE INDEX IF NOT EXISTS operating_scope_lookup ON operating_scopes(source,city,revision)",
     "CREATE TABLE IF NOT EXISTS batches (source TEXT NOT NULL, id TEXT NOT NULL, digest TEXT NOT NULL, revision INTEGER NOT NULL, accepted INTEGER NOT NULL, duplicates INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(source,id))",
     "CREATE TABLE IF NOT EXISTS events (source TEXT NOT NULL, event_id TEXT NOT NULL, order_id TEXT NOT NULL, sequence INTEGER NOT NULL, revision INTEGER NOT NULL, digest TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(source,event_id), UNIQUE(source,order_id,sequence))",
     "CREATE INDEX IF NOT EXISTS event_order ON events(source,order_id,sequence DESC)",

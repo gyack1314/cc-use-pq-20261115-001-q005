@@ -2,6 +2,7 @@ from .storage.database import Database
 from .reference.catalog import Catalog
 from .reference.calendars import Calendars
 from .reference.coverage import Coverage
+from .reference.operating_scope import OperatingScopes
 from .records.intake import Intake
 from .records.csv_input import FileIntake
 from .analysis.engine import AnalysisEngine
@@ -21,9 +22,11 @@ class Ledger:
         self.catalog = Catalog(self.database)
         self.calendars = Calendars(self.database, self.catalog)
         self.coverage = Coverage(self.database, self.catalog)
+        self.scopes = OperatingScopes(self.database, self.catalog)
         self.intake = Intake(self.database, self.catalog)
         self.files = FileIntake(self.intake)
-        self.analysis = AnalysisEngine(self.database, self.catalog, self.calendars, self.coverage, self.intake)
+        self.analysis = AnalysisEngine(self.database, self.catalog, self.calendars, self.coverage,
+                                       self.intake, self.scopes)
         self.editions = Editions(self.database, self.analysis)
         self.review = Review(self.database, self.editions)
         self.export = Export(self.editions, self.review)
@@ -41,4 +44,5 @@ class Ledger:
         with self.database.transaction() as connection:
             revision = self.database.snapshot_revision(connection, revision)
             return {"revision": revision, **self.catalog.snapshot(revision, connection),
-                    "calendars": self.calendars.list(revision=revision, connection=connection)}
+                    "calendars": self.calendars.list(revision=revision, connection=connection),
+                    "operating_scopes": self.scopes.list(revision=revision, connection=connection)}

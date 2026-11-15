@@ -7,9 +7,9 @@ from ..application import Ledger
 from ..errors import LedgerError
 from ..analysis.narrative import explain_result
 from ..analysis.trends import robust_flags
-from .models import (CatalogWrite, CalendarWrite, CoverageWrite, EventBatch, FileBatch, FileInspect,
-                     AnalysisRequest, EditionRequest, DecisionRequest, PublishRequest, RetireRequest,
-                     EditionComparison, ProfileRequest, AnomalyRequest)
+from .models import (CatalogWrite, CalendarWrite, CoverageWrite, OperatingScopeWrite, EventBatch, FileBatch,
+                     FileInspect, AnalysisRequest, EditionRequest, DecisionRequest, PublishRequest,
+                     RetireRequest, EditionComparison, ProfileRequest, AnomalyRequest)
 
 
 def request_value(value):
@@ -75,6 +75,29 @@ def create_app(path=None):
                         revision: int | None = None):
         matrix = ledger.coverage.matrix(source, city, start, end, revision)
         return {"summary": ledger.coverage.summary(matrix), "gaps": ledger.coverage.missing_groups(matrix), "cells": matrix}
+
+    @app.put("/operating-scopes/{identity}")
+    def put_operating_scope(identity: str, body: OperatingScopeWrite):
+        return ledger.scopes.put(identity, body.value, body.expected_version, body.actor)
+
+    @app.get("/operating-scopes")
+    def list_operating_scopes(source: str | None = None, city: str | None = None,
+                              revision: int | None = None):
+        return ledger.scopes.list(source, city, revision)
+
+    @app.get("/operating-scopes/{identity}")
+    def get_operating_scope(identity: str, revision: int | None = None):
+        return ledger.scopes.get(identity, revision)
+
+    @app.get("/operating-scopes/{identity}/history")
+    def operating_scope_history(identity: str):
+        return ledger.scopes.history(identity)
+
+    @app.get("/operating-scope-matrix")
+    def operating_scope_matrix(start: str, end: str, source: list[str] = Query(), city: list[str] = Query(),
+                               revision: int | None = None):
+        cells = ledger.scopes.matrix(source, city, start, end, revision)
+        return {"summary": ledger.scopes.summary(cells), "gaps": ledger.scopes.gaps(cells), "cells": cells}
 
     @app.post("/sources/{source}/batches")
     def ingest(source: str, body: EventBatch):
@@ -211,8 +234,10 @@ def create_app(path=None):
     @app.get("/editions/{identity}/drilldown")
     def drilldown(identity: str, period: str = "current", origin: str | None = None,
                   destination: str | None = None, source: str | None = None, day: str | None = None,
-                  state: str | None = None, limit: int = 100, offset: int = 0):
-        return ledger.investigation.drilldown(identity, period, origin, destination, source, day, state, limit, offset)
+                  state: str | None = None, include_excluded: bool = False,
+                  limit: int = 100, offset: int = 0):
+        return ledger.investigation.drilldown(identity, period, origin, destination, source, day,
+                                              state, limit, offset, include_excluded)
 
     @app.get("/editions/{identity}/orders/{source}/{order_id}")
     def trace_order(identity: str, source: str, order_id: str):
@@ -274,8 +299,10 @@ def create_app(path=None):
 
     @app.get("/editions/{identity}/coverage-query")
     def coverage_query(identity: str, period: str = "current", status: str | None = None,
-                       source: str | None = None, city: str | None = None, limit: int = 100, offset: int = 0):
-        return ledger.query.coverage_filter(identity, period, status, source, city, limit, offset)
+                       source: str | None = None, city: str | None = None,
+                       report_status: str | None = None, limit: int = 100, offset: int = 0):
+        return ledger.query.coverage_filter(identity, period, status, source, city,
+                                            report_status, limit, offset)
 
     @app.get("/editions/{identity}/issues")
     def issues(identity: str, severity: str | None = None, period: str | None = None):

@@ -25,6 +25,12 @@ class CoverageWrite(StrictModel):
     actor: StrictStr = "operator"
 
 
+class OperatingScopeWrite(StrictModel):
+    value: dict[str, Any]
+    expected_version: StrictInt = 0
+    actor: StrictStr = "operator"
+
+
 class EventBatch(StrictModel):
     batch_id: StrictStr
     events: list[dict[str, Any]] = Field(min_length=1, max_length=5000)
@@ -53,6 +59,7 @@ class AnalysisRequest(StrictModel):
     revision: StrictInt | None = None
     baseline_start: StrictStr | None = None
     baseline_end: StrictStr | None = None
+    scope_mode: Literal["legacy", "declared"] | None = None
 
 
 class EditionRequest(StrictModel):

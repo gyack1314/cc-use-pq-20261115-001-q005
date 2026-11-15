@@ -23,7 +23,7 @@ class Window:
 
 def normalize_request(value):
     allowed = {"name", "start", "end", "baseline_start", "baseline_end", "cities", "sources",
-               "destinations", "family_only", "revision", "minimum_orders"}
+               "destinations", "family_only", "revision", "minimum_orders", "scope_mode"}
     fields(value, allowed, {"name", "start", "end", "cities", "sources"})
     dates = date_range(value["start"], value["end"], 93)
     name = text(value["name"], "分析名称", 120)
@@ -37,6 +37,12 @@ def normalize_request(value):
     result = {"name": name, "start": dates[0].isoformat(), "end": dates[-1].isoformat(),
               "cities": cities, "sources": sources, "destinations": destinations,
               "family_only": family, "minimum_orders": integer(value.get("minimum_orders", 1), "minimum_orders", 1, 10000)}
+    # 旧请求不含scope_mode，必须继续按旧覆盖语义重算，不能静默改成新口径。
+    if "scope_mode" in value:
+        mode = value["scope_mode"]
+        require(mode in {"legacy", "declared"}, "invalid_scope_mode",
+                "scope_mode必须是legacy或declared")
+        result["scope_mode"] = mode
     baseline_start = value.get("baseline_start")
     baseline_end = value.get("baseline_end")
     require((baseline_start is None) == (baseline_end is None), "incomplete_baseline", "对比窗口需要同时提供起止日期")

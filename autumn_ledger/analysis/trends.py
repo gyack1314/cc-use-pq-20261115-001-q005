@@ -34,11 +34,8 @@ def consecutive_runs(rows, predicate):
 
 
 def coverage_by_city_day(period):
-    grouped = defaultdict(list)
-    for cell in period["coverage"]:
-        grouped[(cell["city"], cell["day"])].append(cell["status"])
-    return {key: bool(statuses) and all(value == "complete" for value in statuses)
-            for key, statuses in grouped.items()}
+    from .scope_view import complete_city_days
+    return complete_city_days(period)
 
 
 def daily_trends(period):

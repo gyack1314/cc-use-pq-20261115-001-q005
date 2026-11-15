@@ -81,7 +81,21 @@ def run_demo():
             replacement = client.post("/editions", json={"request_key": "demo-2", "request": request_data()}).json()
             assert replacement["summary"]["net_cents"] == 110000
             assert ledger.database.integrity()["ok"]
+            for identity, name in (("sz", "合成深圳"), ("nj", "合成南京")):
+                ledger.scopes.put(f"alpha-{identity}", {"source": "alpha", "city": identity,
+                                                        "start": "2026-11-09", "end": "2026-11-22",
+                                                        "applicable": True})
+                ledger.scopes.put(f"beta-{identity}", {"source": "beta", "city": identity,
+                                                       "start": "2026-11-09", "end": "2026-11-22",
+                                                       "applicable": False})
+            declared_request = request_data(scope_mode="declared")
+            declared = client.post("/editions", json={"request_key": "demo-declared", "request": declared_request})
+            assert declared.status_code == 200, declared.text
+            declared_summary = declared.json()["summary"]
+            assert declared_summary["orders"] == 3
+            assert ledger.analysis.run(declared_request)["periods"]["current"]["coverage_summary"]["cells"] == 14
             return {"ok": True, "orders": 3, "original_net_cents": 120000, "corrected_net_cents": 110000,
                     "stale_publish_blocked": True, "old_snapshot_reproduced": True,
                     "bundle_verified": True, "revision_before_correction": revision,
+                    "declared_scope_orders": declared_summary["orders"],
                     "final_revision": ledger.database.revision()}

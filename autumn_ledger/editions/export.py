@@ -72,7 +72,29 @@ class Export:
         edition = self.edition(identity)
         require(period in edition["result"]["periods"], "unknown_period", "分析没有该期间")
         rows = edition["result"]["periods"][period]["coverage"]
+        declared = any("applicability" in row for row in rows)
+        if declared:
+            headers = ["source", "city", "day", "applicability", "scope_ids", "status",
+                       "report_status", "orders", "version", "revision", "note"]
+            flat = [{**row, "scope_ids": "|".join(row.get("scope_ids", []))} for row in rows]
+            return encode_csv(headers, flat)
         return encode_csv(["source", "city", "day", "status", "version", "revision", "note"], rows)
+
+    def scopes(self, identity, period="current"):
+        edition = self.edition(identity)
+        require(period in edition["result"]["periods"], "unknown_period", "分析没有该期间")
+        period_value = edition["result"]["periods"][period]
+        rules = (period_value.get("scope") or {}).get("rules", [])
+        return encode_csv(["id", "version", "source", "city", "start", "end", "applicable", "status", "note"],
+                          rules)
+
+    def scope_changes(self, identity, period="current"):
+        edition = self.edition(identity)
+        require(period in edition["result"]["periods"], "unknown_period", "分析没有该期间")
+        content = edition["result"]["periods"][period]
+        return encode_csv(["source", "city", "rule_id", "version", "start", "end", "applicable", "status", "note"],
+                          [{"source": rule["source"], "city": rule["city"], "rule_id": rule["id"], **rule}
+                           for rule in content.get("scope_declarations", [])])
 
     def lineage(self, identity):
         edition = self.edition(identity)
@@ -88,6 +110,8 @@ class Export:
             for table in TABLE_DIMENSIONS:
                 files[f"{period}/{table}.csv"] = self.table(identity, table, period, published_only).encode("utf-8")
             files[f"{period}/coverage.csv"] = self.coverage(identity, period).encode("utf-8")
+            if "scope" in result["periods"][period]:
+                files[f"{period}/scope.csv"] = self.scopes(identity, period).encode("utf-8")
         manifest = {"format": "autumn-ledger-bundle-v1", "edition_id": identity,
                     "result_digest": document["result_digest"],
                     "files": {name: {"bytes": len(content), "sha256": self.bytes_digest(content)}
